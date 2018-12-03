@@ -94,6 +94,7 @@ class KinAppManager(private val context: Context, private val developerPayload: 
                     }
                     return@async products
                 }
+                return@async null
             } catch (e: RemoteException) {
                 e.printStackTrace()
             }
