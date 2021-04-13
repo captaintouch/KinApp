@@ -1,24 +1,18 @@
 package com.github.stephenvinouze.core.managers
 
 import android.app.Activity
-import android.app.PendingIntent
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.ServiceConnection
 import android.os.Bundle
-import android.os.IBinder
 import android.os.RemoteException
-import com.android.vending.billing.IInAppBillingService
+import com.android.billingclient.api.*
 import com.github.stephenvinouze.core.models.*
 import kotlinx.coroutines.*
-import org.json.JSONObject
-
 
 /**
  * Created by stephenvinouze on 13/03/2017.
  */
-class KinAppManager(private val context: Context, private val developerPayload: String) {
+class KinAppManager(private val context: Context, private val developerPayload: String): PurchasesUpdatedListener, ConsumeResponseListener, AcknowledgePurchaseResponseListener {
 
     companion object {
         const val TEST_PURCHASE_PREFIX = "android.test"
@@ -50,9 +44,9 @@ class KinAppManager(private val context: Context, private val developerPayload: 
         private const val RESPONSE_INAPP_CONTINUATION_TOKEN = "INAPP_CONTINUATION_TOKEN"
     }
 
-    private var billingService: IInAppBillingService? = null
+    private var billingClient: BillingClient? = null
     private var listener: KinAppListener? = null
-    private var billingConnection: ServiceConnection = object : ServiceConnection {
+    /*private var billingConnection: ServiceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
             billingService = IInAppBillingService.Stub.asInterface(service)
             listener?.onBillingReady()
@@ -61,43 +55,54 @@ class KinAppManager(private val context: Context, private val developerPayload: 
         override fun onServiceDisconnected(name: ComponentName) {
             billingService = null
         }
+    }*/
+
+    init {
+        setupClient()
+    }
+
+    private fun setupClient() {
+        val billingClient = BillingClient.newBuilder(this.context).setListener(this).build()
+        this.billingClient = billingClient
+        billingClient.startConnection(object : BillingClientStateListener {
+            override fun onBillingSetupFinished(p0: BillingResult) {
+                listener?.onBillingReady()
+            }
+
+            override fun onBillingServiceDisconnected() {
+                this@KinAppManager.billingClient = null
+            }
+        })
     }
 
     fun bind(listener: KinAppListener? = null) {
         this.listener = listener
         val billingIntent = Intent(KINAPP_INTENT)
         billingIntent.`package` = KINAPP_PACKAGE
-        context.bindService(billingIntent, billingConnection, Context.BIND_AUTO_CREATE)
+        billingClient?.endConnection()
+        billingClient = null
+        setupClient()
     }
 
     fun unbind() {
-        if (billingService != null) {
-            context.unbindService(billingConnection)
-        }
+        billingClient?.endConnection()
+        billingClient = null
     }
+    suspend fun fetchProductsAsync(productIds: ArrayList<String>, onReady: (List<KinAppProduct>) -> Unit) {
 
-    fun isBillingSupported(productType: KinAppProductType): Boolean =
-            billingService?.isBillingSupported(KINAPP_API_VERSION, context.packageName, productType.value) == KINAPP_RESPONSE_RESULT_OK
-
-    suspend fun fetchProductsAsync(productIds: ArrayList<String>, productType: KinAppProductType): Deferred<List<KinAppProduct>?> {
-        return GlobalScope.async(Dispatchers.Main, CoroutineStart.DEFAULT) {
-            val bundle = Bundle()
-            bundle.putStringArrayList(GET_ITEM_LIST, productIds)
-            try {
-                val responseBundle = billingService?.getSkuDetails(KINAPP_API_VERSION, this@KinAppManager.context.packageName, productType.value, bundle)
-                if (getResult(responseBundle, RESPONSE_CODE) == KINAPP_RESPONSE_RESULT_OK) {
-                    val inappProducts = responseBundle?.getStringArrayList(RESPONSE_ITEM_LIST)
+            val params = SkuDetailsParams.newBuilder()
+            params.setSkusList(productIds).setType(BillingClient.SkuType.INAPP)
+            val output = billingClient?.querySkuDetailsAsync(params.build(), SkuDetailsResponseListener { billingResult, productDetails ->
+                if (billingResult.responseCode == KINAPP_RESPONSE_RESULT_OK) {
                     val products = arrayListOf<KinAppProduct>()
-                    inappProducts?.forEach {
+                    productDetails?.forEach {
                         products.add(getProduct(it))
                     }
-                    return@async products
+                    onReady(products)
+                } else {
+                    onReady(listOf())
                 }
-            } catch (e: RemoteException) {
-                e.printStackTrace()
-            }
-            return@async null
-        }
+            })
     }
 
     fun restorePurchases(productType: KinAppProductType): List<KinAppPurchase>? {
@@ -110,7 +115,7 @@ class KinAppManager(private val context: Context, private val developerPayload: 
     }
 
     fun purchase(activity: Activity, productId: String, productType: KinAppProductType) {
-        try {
+        /*try {
             val responseBundle = billingService?.getBuyIntent(KINAPP_API_VERSION, context.packageName, productId, productType.value, developerPayload)
             val result = getResult(responseBundle, RESPONSE_CODE)
             if (result == KINAPP_RESPONSE_RESULT_OK) {
@@ -121,18 +126,35 @@ class KinAppManager(private val context: Context, private val developerPayload: 
             }
         } catch (e: RemoteException) {
             e.printStackTrace()
-        }
+        }*/
+        val params = SkuDetailsParams.newBuilder()
+        params.setSkusList(listOf(productId)).setType(BillingClient.SkuType.INAPP)
+        billingClient?.querySkuDetailsAsync(params.build(),
+                object : SkuDetailsResponseListener {
+                    override fun onSkuDetailsResponse(p0: BillingResult, p1: MutableList<SkuDetails>?) {
+                        if (p0.responseCode == KINAPP_RESPONSE_RESULT_OK) {
+                            p1?.forEach { skuDetails ->
+                                val purchaseParams = BillingFlowParams.newBuilder()
+                                        .setSkuDetails(skuDetails)
+                                        .build()
+                                billingClient?.launchBillingFlow(activity, purchaseParams)
+                            }
+                        } else if (p0.responseCode == KINAPP_RESPONSE_RESULT_ALREADY_OWNED) {
+                            listener?.onPurchaseFinished(KinAppPurchaseResult.ALREADY_OWNED, null)
+                        }
+
+                    }
+                }
+        )
     }
 
-    fun verifyPurchase(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
-        if (requestCode == KINAPP_REQUEST_CODE) {
-            if (resultCode == Activity.RESULT_OK) {
-                val purchaseData = data?.getStringExtra(RESPONSE_INAPP_PURCHASE_DATA)
-                val dataSignature = data?.getStringExtra(RESPONSE_INAPP_SIGNATURE)
-                if (purchaseData != null) {
-                    val purchase = getPurchase(purchaseData)
+    fun verifyPurchase(billingResult: BillingResult, purchase: Purchase?): Boolean {
+            if (billingResult.responseCode == KINAPP_RESPONSE_RESULT_OK || billingResult.responseCode == KINAPP_RESPONSE_RESULT_ALREADY_OWNED) {
+                if (purchase != null) {
+                    val dataSignature = purchase.signature
+                    val purchase = getPurchase(purchase)
                     if (purchase.productId.startsWith(TEST_PURCHASE_PREFIX) ||
-                            (dataSignature != null && SecurityManager.verifyPurchase(developerPayload, purchaseData, dataSignature))) {
+                            (dataSignature != null && SecurityManager.verifyPurchase(developerPayload, purchase.productId, dataSignature))) {
                         listener?.onPurchaseFinished(KinAppPurchaseResult.SUCCESS, purchase)
                     } else {
                         listener?.onPurchaseFinished(KinAppPurchaseResult.INVALID_SIGNATURE, null)
@@ -140,80 +162,86 @@ class KinAppManager(private val context: Context, private val developerPayload: 
                 } else {
                     listener?.onPurchaseFinished(KinAppPurchaseResult.INVALID_PURCHASE, null)
                 }
-            } else if (resultCode == Activity.RESULT_CANCELED) {
+            } else if (billingResult.responseCode == Activity.RESULT_CANCELED) {
                 listener?.onPurchaseFinished(KinAppPurchaseResult.CANCEL, null)
             } else {
                 listener?.onPurchaseFinished(KinAppPurchaseResult.INVALID_PURCHASE, null)
             }
             return true
-        }
-        return false
-    }
-
-    suspend fun consumePurchaseAsync(purchase: KinAppPurchase): Deferred<Boolean> {
-        return GlobalScope.async(Dispatchers.Main, CoroutineStart.DEFAULT) {
-            try {
-                val response = billingService?.consumePurchase(KINAPP_API_VERSION, this@KinAppManager.context.packageName, purchase.purchaseToken)
-                return@async response == KINAPP_RESPONSE_RESULT_OK
-            } catch (e: RemoteException) {
-                e.printStackTrace()
-                return@async false
-            }
-        }
     }
 
     private fun getResult(responseBundle: Bundle?, responseExtra: String): Int? =
             responseBundle?.getInt(responseExtra)
 
-    private fun getProduct(productData: String): KinAppProduct {
-        val inappProduct = JSONObject(productData)
+    private fun getProduct(productData: SkuDetails): KinAppProduct {
         return KinAppProduct(
-                product_id = inappProduct.optString("productId"),
-                title = inappProduct.optString("title"),
-                description = inappProduct.optString("description"),
-                price = inappProduct.optString("price"),
-                priceAmountMicros = inappProduct.optLong("price_amount_micros"),
-                priceCurrencyCode = inappProduct.optString("price_currency_code"),
-                type = if(inappProduct.optString("type").equals(SUBS_TYPE, ignoreCase = true)) KinAppProductType.SUBSCRIPTION else KinAppProductType.INAPP)
+                product_id = productData.sku,
+                title = productData.title,
+                description = productData.description,
+                price = productData.price,
+                priceAmountMicros = productData.priceAmountMicros,
+                priceCurrencyCode = productData.priceCurrencyCode,
+                type = if(productData.type.equals(SUBS_TYPE, ignoreCase = true)) KinAppProductType.SUBSCRIPTION else KinAppProductType.INAPP)
     }
 
-    private fun getPurchase(purchaseData: String): KinAppPurchase {
-        val item = JSONObject(purchaseData)
+    private fun getPurchase(purchaseData: Purchase): KinAppPurchase {
+
+        fun purchaseState(purchaseState: Int): KinAppPurchaseState {
+            if (purchaseState == Purchase.PurchaseState.PURCHASED) {
+                return KinAppPurchaseState.PURCHASED
+            } else {
+                return KinAppPurchaseState.CANCELED
+            }
+        }
+
         return KinAppPurchase(
-                orderId = item.optString("orderId"),
-                productId = item.optString("productId"),
-                purchaseTime = item.optLong("purchaseTime"),
-                purchaseToken = item.optString("purchaseToken"),
-                purchaseState = KinAppPurchaseState.values()[item.optInt("purchaseState", KinAppPurchaseState.CANCELED.value)],
-                packageName = item.optString("purchaseToken"),
-                developerPayload = item.optString("developerPayload"),
-                autoRenewing = item.optBoolean("autoRenewing")
+                orderId = purchaseData.orderId,
+                productId = purchaseData.sku,
+                purchaseTime = purchaseData.purchaseTime,
+                purchaseToken = purchaseData.purchaseToken,
+                purchaseState = purchaseState(purchaseData.purchaseState),
+                packageName = purchaseData.purchaseToken,
+                developerPayload = purchaseData.developerPayload,
+                autoRenewing = purchaseData.isAutoRenewing
         )
     }
 
     private fun retrievePurchases(purchases: MutableList<KinAppPurchase>, productType: KinAppProductType, continuationToken: String?): MutableList<KinAppPurchase> {
-        val responseBundle = billingService?.getPurchases(KINAPP_API_VERSION, context.packageName, productType.value, continuationToken)
-        if (getResult(responseBundle, RESPONSE_CODE) == KINAPP_RESPONSE_RESULT_OK) {
-            val inappPurchases = responseBundle?.getStringArrayList(RESPONSE_INAPP_PURCHASE_DATA_LIST)
-            if (inappPurchases != null) {
-                inappPurchases.forEach {
-                    purchases.add(getPurchase(it))
-                }
-
-                val newContinuationToken = responseBundle.getString(RESPONSE_INAPP_CONTINUATION_TOKEN)
-                if (newContinuationToken != null) {
-                    retrievePurchases(purchases, productType, newContinuationToken)
-                }
-
-                return purchases
-            }
-        }
-        return purchases
+        val purchaseResult = billingClient?.queryPurchases(productType.value)
+        return purchaseResult?.purchasesList?.map {
+            return@map getPurchase(it)
+        }?.toMutableList() ?: mutableListOf()
     }
 
     interface KinAppListener {
         fun onBillingReady()
         fun onPurchaseFinished(purchaseResult: KinAppPurchaseResult, purchase: KinAppPurchase?)
+    }
+
+    override fun onPurchasesUpdated(p0: BillingResult, p1: MutableList<Purchase>?) {
+        val purchase = p1?.firstOrNull()
+        if (purchase != null && purchase.purchaseState == Purchase.PurchaseState.PURCHASED && !purchase.isAcknowledged) {
+            val acknowledgePurchaseParams = AcknowledgePurchaseParams.newBuilder()
+                        .setPurchaseToken(purchase.purchaseToken)
+            billingClient?.acknowledgePurchase((acknowledgePurchaseParams.build()), this)
+        }
+        verifyPurchase(p0, purchase)
+    }
+
+    override fun onConsumeResponse(p0: BillingResult, p1: String) {
+
+    }
+
+    override fun onAcknowledgePurchaseResponse(p0: BillingResult) {
+
+    }
+
+    fun isBillingSupported(productType: KinAppProductType): Boolean {
+        val billingReady = billingClient?.isReady ?: false
+        if (productType == KinAppProductType.SUBSCRIPTION) {
+            return billingReady && (billingClient?.isFeatureSupported("SUBSCRIPTIONS")?.responseCode == KINAPP_RESPONSE_RESULT_OK)
+        }
+        return billingReady
     }
 
 }

@@ -48,15 +48,8 @@ class MainActivity : AppCompatActivity(), KinAppManager.KinAppListener, View.OnC
         buyProductButton.setOnClickListener(this)
         consumePurchasesButton.setOnClickListener(this)
         restorePurchasesButton.setOnClickListener(this)
-
-        billingManager.bind(this)
     }
-
-    override fun onDestroy() {
-        billingManager.unbind()
-        super.onDestroy()
-    }
-
+    
     private fun displayPurchaseDialog(title: String, content: String) {
         MaterialDialog.Builder(this)
                 .title(title)
@@ -65,46 +58,7 @@ class MainActivity : AppCompatActivity(), KinAppManager.KinAppListener, View.OnC
                 .show()
     }
 
-    override fun onClick(view: View?) {
-        if (billingManager.isBillingSupported(KinAppProductType.INAPP)) {
-            when (view) {
-                fetchProductsButton -> {
-                    GlobalScope.launch(Dispatchers.Main, CoroutineStart.DEFAULT) {
-                        products = billingManager.fetchProductsAsync(arrayListOf(KinAppManager.TEST_PURCHASE_SUCCESS), KinAppProductType.INAPP).await()?.toMutableList()
 
-                        Toast.makeText(this@MainActivity, "Fetched " + products?.size + " products", Toast.LENGTH_LONG).show()
-                        if (products?.isNotEmpty() == true)
-                            buyProductButton.isEnabled = true
-                    }
-                }
-                buyProductButton -> {
-                    products?.first()?.let {
-                        billingManager.purchase(this, it.product_id, KinAppProductType.INAPP)
-                    }
-                }
-                consumePurchasesButton -> {
-                    GlobalScope.launch(Dispatchers.Main, CoroutineStart.DEFAULT) {
-                        purchases?.forEach {
-                            billingManager.consumePurchaseAsync(it).await()
-                        }
-                        Toast.makeText(this@MainActivity, "Consumed " + purchases?.size + " purchases", Toast.LENGTH_LONG).show()
-                        consumePurchasesButton.isEnabled = false
-                    }
-                }
-                restorePurchasesButton -> {
-                    purchases = billingManager.restorePurchases(KinAppProductType.INAPP) as MutableList<KinAppPurchase>
-                    Toast.makeText(this, "Restored " + purchases?.size + " purchases", Toast.LENGTH_LONG).show()
-                    if (purchases?.isNotEmpty() == true)
-                        consumePurchasesButton.isEnabled = true
-                }
-            }
-        } else {
-            displayPurchaseDialog(
-                    title = "In App not supported",
-                    content = "You need the Play services to handle in app purchase"
-            )
-        }
-    }
 
     override fun onBillingReady() {
         fetchProductsButton.isEnabled = true
@@ -147,10 +101,9 @@ class MainActivity : AppCompatActivity(), KinAppManager.KinAppListener, View.OnC
         }
     }
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (!billingManager.verifyPurchase(requestCode, resultCode, data)) {
-            super.onActivityResult(requestCode, resultCode, data)
-        }
+    override fun onClick(p0: View?) {
+
     }
+
 
 }
