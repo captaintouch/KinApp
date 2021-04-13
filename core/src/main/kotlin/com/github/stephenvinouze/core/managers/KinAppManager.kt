@@ -88,9 +88,9 @@ class KinAppManager(private val context: Context, private val developerPayload: 
         billingClient?.endConnection()
         billingClient = null
     }
-    suspend fun fetchProductsAsync(productIds: ArrayList<String>, onReady: (List<KinAppProduct>) -> Unit) {
+    suspend fun fetchProductsAsync(productIds: ArrayList<String>, isSubscription: Boolean, onReady: (List<KinAppProduct>) -> Unit) {
             val params = SkuDetailsParams.newBuilder()
-            params.setSkusList(productIds)
+            params.setSkusList(productIds).setType(if (isSubscription) BillingClient.SkuType.SUBS else BillingClient.SkuType.INAPP)
             val output = billingClient?.querySkuDetailsAsync(params.build(), SkuDetailsResponseListener { billingResult, productDetails ->
                 if (billingResult.responseCode == KINAPP_RESPONSE_RESULT_OK) {
                     val products = arrayListOf<KinAppProduct>()
