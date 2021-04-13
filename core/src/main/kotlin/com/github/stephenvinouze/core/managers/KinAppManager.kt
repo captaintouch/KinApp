@@ -26,6 +26,7 @@ class KinAppManager(private val context: Context, private val developerPayload: 
 
         private const val KINAPP_REQUEST_CODE = 1001
         private const val KINAPP_RESPONSE_RESULT_OK = 0
+        private const val KINAPP_RESPONSE_RESULT_CANCELLED = 1
         private const val KINAPP_RESPONSE_RESULT_ALREADY_OWNED = 7
 
         private const val KINAPP_API_VERSION = 3
@@ -114,20 +115,8 @@ class KinAppManager(private val context: Context, private val developerPayload: 
     }
 
     fun purchase(activity: Activity, productId: String, productType: KinAppProductType) {
-        /*try {
-            val responseBundle = billingService?.getBuyIntent(KINAPP_API_VERSION, context.packageName, productId, productType.value, developerPayload)
-            val result = getResult(responseBundle, RESPONSE_CODE)
-            if (result == KINAPP_RESPONSE_RESULT_OK) {
-                val pendingIntent = responseBundle?.getParcelable<PendingIntent>(RESPONSE_BUY_INTENT)
-                activity.startIntentSenderForResult(pendingIntent?.intentSender, KINAPP_REQUEST_CODE, Intent(), 0, 0, 0)
-            } else if (result == KINAPP_RESPONSE_RESULT_ALREADY_OWNED) {
-                listener?.onPurchaseFinished(KinAppPurchaseResult.ALREADY_OWNED, null)
-            }
-        } catch (e: RemoteException) {
-            e.printStackTrace()
-        }*/
         val params = SkuDetailsParams.newBuilder()
-        params.setSkusList(listOf(productId)).setType(BillingClient.SkuType.INAPP)
+        params.setSkusList(listOf(productId)).setType(if (productType == KinAppProductType.SUBSCRIPTION) BillingClient.SkuType.SUBS else BillingClient.SkuType.INAPP)
         billingClient?.querySkuDetailsAsync(params.build(),
                 object : SkuDetailsResponseListener {
                     override fun onSkuDetailsResponse(p0: BillingResult, p1: MutableList<SkuDetails>?) {
@@ -162,7 +151,7 @@ class KinAppManager(private val context: Context, private val developerPayload: 
                 } else {
                     listener?.onPurchaseFinished(KinAppPurchaseResult.INVALID_PURCHASE, null)
                 }
-            } else if (billingResult.responseCode == Activity.RESULT_CANCELED) {
+            } else if (billingResult.responseCode == KINAPP_RESPONSE_RESULT_CANCELLED) {
                 listener?.onPurchaseFinished(KinAppPurchaseResult.CANCEL, null)
             } else {
                 listener?.onPurchaseFinished(KinAppPurchaseResult.INVALID_PURCHASE, null)
