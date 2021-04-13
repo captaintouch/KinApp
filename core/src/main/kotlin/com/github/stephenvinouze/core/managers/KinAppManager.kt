@@ -62,7 +62,7 @@ class KinAppManager(private val context: Context, private val developerPayload: 
     }
 
     private fun setupClient() {
-        val billingClient = BillingClient.newBuilder(this.context).setListener(this).build()
+        val billingClient = BillingClient.newBuilder(this.context).enablePendingPurchases().setListener(this).build()
         this.billingClient = billingClient
         billingClient.startConnection(object : BillingClientStateListener {
             override fun onBillingSetupFinished(p0: BillingResult) {
