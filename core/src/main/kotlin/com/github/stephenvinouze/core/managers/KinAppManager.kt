@@ -151,9 +151,10 @@ class KinAppManager(private val context: Context, private val developerPayload: 
             if (billingResult.responseCode == KINAPP_RESPONSE_RESULT_OK || billingResult.responseCode == KINAPP_RESPONSE_RESULT_ALREADY_OWNED) {
                 if (purchase != null) {
                     val dataSignature = purchase.signature
+                    val json = purchase.originalJson
                     val purchase = getPurchase(purchase)
                     if (purchase.productId.startsWith(TEST_PURCHASE_PREFIX) ||
-                            (dataSignature != null && SecurityManager.verifyPurchase(developerPayload, purchase.productId, dataSignature))) {
+                            (dataSignature != null && SecurityManager.verifyPurchase(developerPayload, json, dataSignature))) {
                         listener?.onPurchaseFinished(KinAppPurchaseResult.SUCCESS, purchase)
                     } else {
                         listener?.onPurchaseFinished(KinAppPurchaseResult.INVALID_SIGNATURE, null)
@@ -199,7 +200,7 @@ class KinAppManager(private val context: Context, private val developerPayload: 
                 purchaseTime = purchaseData.purchaseTime,
                 purchaseToken = purchaseData.purchaseToken,
                 purchaseState = purchaseState(purchaseData.purchaseState),
-                packageName = purchaseData.purchaseToken,
+                packageName = purchaseData.packageName,
                 developerPayload = purchaseData.developerPayload,
                 autoRenewing = purchaseData.isAutoRenewing
         )
