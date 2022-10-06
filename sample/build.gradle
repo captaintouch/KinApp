@@ -42,7 +42,7 @@ dependencies {
 
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.1.1"
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.1.1"
-    implementation "com.android.billingclient:billing:3.0.3"
+    implementation "com.android.billingclient:billing:5.0.0"
 
     implementation ('com.afollestad.material-dialogs:core:0.9.4.7', {
         exclude group: 'com.android.support', module: 'appcompat-v7'
