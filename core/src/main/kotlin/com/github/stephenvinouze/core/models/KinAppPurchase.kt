@@ -9,7 +9,7 @@ import kotlinx.android.parcel.Parcelize
 @Parcelize
 data class KinAppPurchase(
         val orderId: String,
-        val productId: String,
+        val productIds: ArrayList<String>,
         val purchaseTime: Long,
         val purchaseToken: String,
         val purchaseState: KinAppPurchaseState,

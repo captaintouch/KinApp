@@ -9,6 +9,7 @@ import com.android.billingclient.api.*
 import com.github.stephenvinouze.core.models.*
 import kotlinx.coroutines.*
 
+
 /**
  * Created by stephenvinouze on 13/03/2017.
  */
@@ -105,13 +106,15 @@ class KinAppManager(private val context: Context, private val developerPayload: 
             })
     }
 
-    fun restorePurchases(productType: KinAppProductType): List<KinAppPurchase>? {
+    fun restorePurchases(productType: KinAppProductType, onResult: (List<KinAppPurchase>?) -> Unit) {
         try {
-            return retrievePurchases(mutableListOf(), productType, null)
+            retrievePurchases(mutableListOf(), productType, null, onResult = {
+                onResult(it)
+            })
         } catch (e: RemoteException) {
             e.printStackTrace()
+            onResult(null)
         }
-        return null
     }
 
     fun purchase(activity: Activity, productId: String, productType: KinAppProductType) {
@@ -142,7 +145,7 @@ class KinAppManager(private val context: Context, private val developerPayload: 
                     val dataSignature = purchase.signature
                     val json = purchase.originalJson
                     val purchase = getPurchase(purchase)
-                    if (purchase.productId.startsWith(TEST_PURCHASE_PREFIX) ||
+                    if (purchase.productIds.any { it.startsWith(TEST_PURCHASE_PREFIX) } ||
                             (dataSignature != null && SecurityManager.verifyPurchase(developerPayload, json, dataSignature))) {
                         listener?.onPurchaseFinished(KinAppPurchaseResult.SUCCESS, purchase)
                     } else {
@@ -185,7 +188,7 @@ class KinAppManager(private val context: Context, private val developerPayload: 
 
         return KinAppPurchase(
                 orderId = purchaseData.orderId,
-                productId = purchaseData.sku,
+                productIds = purchaseData.skus,
                 purchaseTime = purchaseData.purchaseTime,
                 purchaseToken = purchaseData.purchaseToken,
                 purchaseState = purchaseState(purchaseData.purchaseState),
@@ -195,11 +198,10 @@ class KinAppManager(private val context: Context, private val developerPayload: 
         )
     }
 
-    private fun retrievePurchases(purchases: MutableList<KinAppPurchase>, productType: KinAppProductType, continuationToken: String?): MutableList<KinAppPurchase> {
-        val purchaseResult = billingClient?.queryPurchases(productType.value)
-        return purchaseResult?.purchasesList?.map {
-            return@map getPurchase(it)
-        }?.toMutableList() ?: mutableListOf()
+    private fun retrievePurchases(purchases: MutableList<KinAppPurchase>, productType: KinAppProductType, continuationToken: String?, onResult: (MutableList<KinAppPurchase>) -> Unit) {
+        billingClient?.queryPurchasesAsync(productType.billingType(), PurchasesResponseListener { billingResult, list ->
+            onResult(list.map { getPurchase(it) }.toMutableList())
+        })
     }
 
     interface KinAppListener {
